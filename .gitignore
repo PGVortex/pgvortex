@@ -1,0 +1,13 @@
+*.bc
+*.dylib
+*.o
+*.so
+*.so.*
+/.deps/
+/results/
+/regression.diffs
+/regression.out
+/tmp_check/
+/tmp_check_iso/
+compile_commands.json
+.DS_Store

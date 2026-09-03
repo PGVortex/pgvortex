@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: PostgreSQL ${{ matrix.postgresql }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        postgresql: ["17", "18"]
+
+    env:
+      PG_CONFIG: /usr/lib/postgresql/${{ matrix.postgresql }}/bin/pg_config
+      PG_VERSION: ${{ matrix.postgresql }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL and pgvector
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install --yes \
+            "postgresql-${PG_VERSION}" \
+            "postgresql-server-dev-${PG_VERSION}" \
+            "postgresql-${PG_VERSION}-pgvector"
+
+      - name: Build
+        run: make
+
+      - name: Install
+        run: sudo make install
+
+      - name: Smoke test extension
+        run: |
+          sudo pg_ctlcluster "${PG_VERSION}" main status \
+            || sudo pg_ctlcluster "${PG_VERSION}" main start
+          sudo -u postgres psql --set ON_ERROR_STOP=1 --command \
+            "CREATE EXTENSION pgvortex CASCADE;"
+          test "$(sudo -u postgres psql --tuples-only --no-align --command \
+            'SELECT pgvortex_version();')" = "0.1.0"
