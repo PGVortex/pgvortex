@@ -2,46 +2,49 @@
 
 Target: publish the first open-source release by the end of December 2026.
 
-The labels below are release-confidence targets, not claims about the current
-implementation. The repository currently contains the phase-one extension
-skeleton only.
+The current repository contains only the Architecture v1 skeleton. Items below
+are targets, not implemented features.
 
-## Phase 1: foundation
+## September: executable vertical slice
 
-- PGXS build and extension packaging for PostgreSQL 17 and 18
-- pgvector dependency and centralized compatibility boundary
-- SharedBuffer, MMAP, planner, executor, statistics, and test layout
-- architecture decisions and provisional index-format documentation
-- CI compile/install smoke test
+- register the `vortex` access method and pgvector opclasses
+- freeze the first PG/native C ABI and versioned IPC envelope
+- start and supervise one PGVortex vector worker
+- build, publish, load, and search one minimal immutable segment
+- use brute-force shared memtable search for recent vectors
+- complete one end-to-end KNN query through heap MVCC recheck
 
-## v0.1 stable target
+## October: delta and durability
 
-- SharedBuffer IVF-Flat and IVF-PQ
-- PCA training and application
-- Generic WAL, crash recovery, REINDEX, and VACUUM behavior
-- pre-filter and iterative post-filter execution
-- basic hybrid cost model and planner integration
-- correctness, recall, and performance baselines
+- byte-bounded shared memtable, ready-state publication, seal, and rotation
+- WAL-backed status pages and versioned segment manifest
+- segment lifecycle: building, durable, active, obsolete, reclaimable
+- delete bitmap, VACUUM ordering, size-tiered merge, and rebuild
+- recovery reconciliation and crash fault injection at every publication step
 
-## v0.1 beta target
+## November: native performance
 
-- IVF-RaBitQ
-- bitmap inline filtering with TID filter sets
-- HNSW-Flat and one quantized HNSW variant
-- executor-time strategy switching
+- native HNSW as the primary ANN path
+- IVF-Flat after the durability path is stable
+- concurrent segment search, candidate merge, and memory budgeting
+- read-only mmap cold start and optional promotion to RAM
+- static, concurrent, dynamic, recovery, and cold-start benchmarks
 
-## v0.1 experimental target
+## December: hybrid search and release
 
-- Vamana with stable base and mutable delta
-- relation-backed immutable MMAP generations
-- MMAP IVF, HNSW, and Vamana prototypes
+- iterative ANN and filter-aware oversampling
+- basic planner cost model and blocking TopK execution
+- initial scalar filter integration
+- compatibility, recovery, recall, benchmark, and operational documentation
+- release packaging and reproducible PG17/PG18 CI
 
-## Explicitly deferred
+## After the core release gate
 
-- production readiness for every algorithm/storage combination
-- writable MMAP persistence
-- PostgreSQL core patches
-- a per-node `StorageProvider` abstraction shared by buffer and MMAP engines
-- on-disk compatibility guarantees before the format is versioned and frozen
+- IVF-PQ, PCA, RaBitQ, Vamana, and DiskANN
+- worker groups and external vector-service deployment
+- physical replication segment channel
+- PageSegmentStore for page-based cloud PostgreSQL
+- object storage, local cache, Neon/serverless integration, and GPU adapters
 
-More detailed sequencing is tracked in [docs/roadmap.md](docs/roadmap.md).
+The release gate is a complete, recoverable vertical slice, not the number of
+algorithm directories populated. See [docs/roadmap.md](docs/roadmap.md).

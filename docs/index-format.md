@@ -1,41 +1,38 @@
-# Index Format Inventory
+# Format Inventory
 
-This is a logical inventory, not a frozen on-disk specification. The initial
-C headers intentionally define page and generation categories without
-persisted structs.
+This document lists logical records only. No C/C++ struct in the skeleton is a
+frozen disk or wire format.
 
-## SharedBuffer pages
+## PostgreSQL-managed metadata
 
-| Page kind | Responsibility |
-| --- | --- |
-| Meta | format/version, algorithm, feature flags, active roots |
-| Model | centroids, PCA, PQ, or RaBitQ model chunks |
-| Directory | logical ID to current physical version |
-| Graph node | node metadata and visibility state |
-| Graph edge | versioned adjacency data |
-| Code | quantized vector codes |
-| Raw vector | optional rerank material |
-| IVF base posting | compacted structure-of-arrays postings |
-| IVF delta posting | append-only recent postings |
-| Tombstone | logical deletions awaiting consolidation |
-| Retired | pages awaiting safe reclamation |
+- Meta: magic, format version, index generation, next IDs, manifest epoch
+- Status directory: memtable ID to outstanding TID/status pages
+- Status entries: logical vectors not covered by a durable published segment
+- Manifest: active/obsolete segment identities, versions, ranges, locations,
+  models, codecs, checksums, and publication LSNs
 
-All pages will use PostgreSQL page headers. Any special-space header must carry
-a page type and format version. Cross-page references must define validation,
-locking, and recovery rules before implementation.
+These records use PostgreSQL-managed pages and WAL.
 
-## MMAP generations
+## Immutable segment artifact
 
-A generation manifest identifies immutable extents and their logical kinds.
-Published extents are read-only. The manifest switch is the publication point;
-incomplete generations are unreachable and recoverable as build garbage.
-Offsets, lengths, alignment, checksums, endian policy, and maximum dimensions
-must be specified before an experimental format is written.
+- versioned header and bounded section directory
+- native ANN body
+- TID mapping
+- raw vector or quantized code payload
+- transform/codec identifiers
+- statistics and checksums
+- separately durable deletion sidecar
 
-## Compatibility policy
+Every count, offset, dimension, and length requires overflow-safe validation.
+Readers reject unknown versions, algorithms, features, or incompatible models.
+Persisted data contains offsets and IDs, never process pointers.
 
-- never interpret an unknown magic, version, algorithm, or feature flag
-- reject a generation if its bounds or checksum validation fails
-- use overflow-safe arithmetic for all dimensions, counts, and offsets
-- keep process addresses out of pages, WAL, manifests, and shared memory
-- require `REINDEX` until an explicit format upgrade path exists
+## IPC
+
+IPC has an independent protocol version and length-delimited messages. Requests
+own their serialized query/filter data. Responses contain stable tuple
+references and status codes. Backend addresses, PostgreSQL Datums, exceptions,
+and native object pointers cannot cross the boundary.
+
+Until formats are frozen, upgrades require `REINDEX` and stale segment caches
+are discarded.

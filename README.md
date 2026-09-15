@@ -1,76 +1,92 @@
 # PGVortex
 
-PGVortex is an **early-development** PostgreSQL extension for high-performance
-vector indexes and adaptive scalar/vector hybrid search. The PostgreSQL
-extension and shared library are both named `pgvortex`.
+PGVortex is an **early-development** native vector search engine for
+PostgreSQL. It combines PostgreSQL SQL, MVCC, catalog, and durability semantics
+with immutable native ANN segments designed for pointer-based search, SIMD,
+read-only mmap, and future disk or accelerator backends.
 
-The project is designed to remain compatible with the pgvector ecosystem.
-pgvector continues to own vector data types, distance operators, SQL syntax,
-and client integrations. PGVortex will provide separate access methods and
-execution strategies; it will not replace pgvector operators or modify
-pgvector extension members.
+The PostgreSQL extension and shared library are named `pgvortex`. The planned
+index access method is `vortex`.
 
-> PGVortex is not ready for production use. The current `0.1.0` tree is a
-> compilable project skeleton: it installs a version function, but does not
-> yet register an index access method or implement an ANN algorithm. On-disk
-> formats and internal APIs may change without compatibility guarantees.
+> The current `0.1.0` tree is an architecture and build skeleton. It installs
+> `pgvortex_version()` but does not yet register `USING vortex`, start a vector
+> worker, persist a segment, or implement an ANN algorithm. It is not suitable
+> for production use, and no on-disk compatibility is promised yet.
 
-## Intended scope
+## Architecture in one view
 
-- SharedBuffer-native IVF, HNSW, and Vamana indexes with WAL and VACUUM
-- relation-backed, read-only MMAP base generations with SharedBuffer deltas
-- IVF-Flat, PQ, RaBitQ, and optional PCA transforms
-- pre-filter, inline-filter, post-filter, and iterative search
-- planner cost models and executor-time adaptive strategy selection
-- PostgreSQL 17 and 18, implemented as an extension without core patches
-
-SharedBuffer and MMAP engines deliberately have independent hot loops and
-physical layouts. They share mathematical primitives and a coarse search
-cursor boundary, not a per-node storage abstraction.
-
-## Build
-
-Prerequisites:
-
-- PostgreSQL 17 or 18 server development files (`pg_config` and PGXS)
-- a C compiler and GNU Make
-- pgvector installed in the target PostgreSQL installation for runtime use
-
-Build with the desired PostgreSQL installation:
-
-```sh
-make PG_CONFIG=/path/to/pg_config
-sudo make PG_CONFIG=/path/to/pg_config install
+```text
+PostgreSQL Control Plane       Mutable Delta Plane       Native Search Plane
+catalog / IndexAM / WAL        shared memtable           immutable segments
+status / manifest / MVCC       insert / delete           HNSW / IVF / Vamana
+            |                         |                  DiskANN / PQ / PCA
+            +---------- correctness boundary -------------------+
+                                                               |
+                                                        SegmentStore
+                                                 native file / PG pages / object
 ```
 
-Then create the extension. `CASCADE` installs pgvector when its extension
-files are available but it has not yet been created in the database:
+PostgreSQL remains the correctness authority. PGVortex WAL records logical
+delta and publication boundaries rather than individual graph mutations.
+Native ANN bodies are immutable; deletes live in a separately durable sidecar,
+and rebuild/merge publishes a new versioned segment generation.
+
+Storage is abstracted only when a complete segment is written or loaded. Once
+loaded, an algorithm traverses a native `SegmentView` without `ReadBuffer()`,
+PostgreSQL APIs, or per-node storage virtual calls. MMAP is a residency policy,
+not a second ANN implementation.
+
+## pgvector compatibility
+
+PGVortex depends on pgvector and reuses its types, operators, SQL syntax, and
+client ecosystem. It does not redefine pgvector objects or copy its internal
+implementation. All ABI-sensitive adaptation belongs in `src/pg/pgvector_compat.h`.
+
+The intended SQL is:
+
+```sql
+CREATE EXTENSION vector;
+CREATE EXTENSION pgvortex;
+
+CREATE INDEX documents_embedding_idx
+ON documents
+USING vortex (embedding vector_cosine_ops)
+WITH (algorithm = 'hnsw', storage = 'native');
+```
+
+Only extension creation and the version function work in the current skeleton:
 
 ```sql
 CREATE EXTENSION pgvortex CASCADE;
 SELECT pgvortex_version();
 ```
 
-Compilation does not include or copy pgvector internals. Future type and
-operator integration must go through `src/pgvector_compat/`.
+## Build
+
+Prerequisites are PostgreSQL 17 or 18 server development files, PGXS, a C
+compiler, GNU Make, and pgvector installed for runtime testing.
+
+```sh
+make PG_CONFIG=/path/to/pg_config
+sudo make PG_CONFIG=/path/to/pg_config install
+```
+
+CI builds and loads the skeleton against PostgreSQL 17 and 18.
 
 ## Repository map
 
 ```text
-src/common/             shared math and training contracts
-src/shared/             SharedBuffer-specific engines and lifecycle code
-src/mmap/               relation-backed immutable MMAP engines
-src/planner/            planner path and cost-model boundary
-src/executor/           CustomScan and iterative cursor boundary
-src/stats/              persistent and runtime feedback contracts
-src/pgvector_compat/    centralized pgvector ABI adapter
-src/pg_compat/          PostgreSQL-version compatibility boundary
-docs/                   architecture and subsystem design notes
-test/                   regression, crash, recall, and benchmark suites
+src/pg/              PostgreSQL-facing C code and correctness metadata
+src/engine/          PostgreSQL-independent native engine interfaces
+src/storage/         coarse SegmentStore implementations
+src/include/         stable C boundary between layers
+docs/                architecture, durability, and roadmap decisions
+test/                SQL, isolation, crash, recall, and benchmark suites
 ```
 
-Start with [the architecture](docs/architecture.md), then see
-[the roadmap](ROADMAP.md) and [contribution guide](CONTRIBUTING.md).
+Start with [Architecture v1](docs/architecture.md), the
+[native-segment decision](docs/adr/0001-native-segments.md), and the
+[roadmap](ROADMAP.md).
 
 ## License
 

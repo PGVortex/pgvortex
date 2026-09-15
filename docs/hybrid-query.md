@@ -1,6 +1,6 @@
 # Hybrid Query Design
 
-PGVortex targets unchanged pgvector query syntax:
+PGVortex preserves pgvector query syntax:
 
 ```sql
 SELECT *
@@ -11,60 +11,36 @@ ORDER BY embedding <=> $1
 LIMIT 20;
 ```
 
-## Strategies
+## Level 0: iterative ANN
 
-Pre-filter obtains matching heap tuples through a scalar index, bitmap, or
-sequential path, computes exact distances, and maintains TopK. It is favored
-when the filtered cardinality is small.
+The segment cursor retains algorithm state across batches. After heap MVCC and
+scalar quals reject candidates, the executor increases the budget and continues
+instead of restarting. A blocking TopK returns no tuple until ordering is final.
 
-Inline-filter turns scalar bitmap output into a TID filter set. IVF tests TID
-membership before quantized distance. Graph search separates reachability from
-eligibility: a filtered-out node may still be expanded, but it may not be
-emitted as a result.
+## Level 1: filter-aware budget
 
-Post-filter asks ANN for a batch, performs heap visibility and scalar quals,
-reranks when needed, then advances the same ANN cursor until TopK is final or
-the search is exhausted.
-
-## Iterative cursor
-
-`src/executor/search_cursor.h` defines the coarse executor/engine contract:
+The planner estimates scalar selectivity `s`, visibility pass rate `pvis`, and
+limit `k`. An initial candidate budget starts near:
 
 ```text
-begin search (engine entry point)
-next_candidates
-increase_budget
-attach_filter
-get_progress
-end_search
+k / (s * pvis) * safety_factor
 ```
 
-The cursor is not used for per-node storage access. HNSW retains its frontier,
-visited set, and discarded candidates; Vamana retains its beam/frontier; IVF
-retains centroid ordering and posting positions.
+Runtime pass rates refine later batches. The budget maps to HNSW `ef`, IVF
+probes, Vamana width, or DiskANN beam parameters.
 
-## Cost model
+## Level 2: segment sidecars
 
-Let `N` be table rows, `s` scalar selectivity, `F = N * s`, `k` the limit, and
-`pvis` the expected MVCC pass rate.
+Optional tenant/category bitmaps and timestamp zone maps can reject candidates
+inside a segment. Graph search distinguishes traversal from emission: a node
+excluded by a scalar filter may still be expanded to reach eligible neighbors.
 
-```text
-pre-filter cost = scalar path + F * heap access
-                + F * exact distance + TopK
+## Level 3: PostgreSQL bitmap fusion
 
-post-filter candidate budget = k / (s * pvis) * safety factor
+A future `CustomPath`/`CustomScan` can turn B-tree, BRIN, `BitmapAnd`, or
+`BitmapOr` output into a TID filter passed to native search. The planner compares
+this with scalar-first exact search and iterative post-filtering.
 
-inline-IVF cost = bitmap + centroid routing + posting membership tests
-                + matching code distances + rerank
-```
-
-The candidate budget maps to HNSW `ef`, Vamana search width, or IVF probes.
-Estimates also include quantizer and heap-fetch cost.
-
-## Runtime adaptation
-
-The planner records a bounded set of valid alternatives. The blocking executor
-observes actual bitmap cardinality, filter and MVCC pass rates, visited nodes,
-postings scanned, and rerank work. It may increase an engine budget or switch
-to a prepared alternative before returning any tuple. This preserves distance
-ordering and avoids an executor inventing an uncosted plan.
+Cost includes algorithm parameters, segment fanout and residency, dimensions,
+delete ratio, candidate merge, heap fetches, and filter/MVCC rejection. A highly
+selective scalar predicate should be allowed to beat ANN.

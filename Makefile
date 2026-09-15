@@ -1,10 +1,10 @@
 EXTENSION = pgvortex
 MODULE_big = pgvortex
-OBJS = src/pgvortex.o
+OBJS = src/pg/pgvortex.o
 DATA = sql/pgvortex--0.1.0.sql
 PGFILEDESC = "pgvortex - vector indexing and adaptive hybrid search"
 
-PG_CPPFLAGS = -Isrc
+PG_CPPFLAGS = -Isrc -Isrc/include
 
 PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs 2>/dev/null)
