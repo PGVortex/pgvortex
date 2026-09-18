@@ -42,13 +42,16 @@ jobs:
         run: make
 
       - name: Install
-        run: sudo make install
+        run: sudo make PG_CONFIG="${PG_CONFIG}" install
 
       - name: Smoke test extension
         run: |
-          sudo pg_ctlcluster "${PG_VERSION}" main status \
-            || sudo pg_ctlcluster "${PG_VERSION}" main start
-          sudo -u postgres psql --set ON_ERROR_STOP=1 --command \
-            "CREATE EXTENSION pgvortex CASCADE;"
-          test "$(sudo -u postgres psql --tuples-only --no-align --command \
-            'SELECT pgvortex_version();')" = "0.1.0"
+          sudo pg_createcluster --port=55432 --start "${PG_VERSION}" ci
+
+          sudo -u postgres psql --cluster "${PG_VERSION}/ci" \
+            -X -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE EXTENSION pgvortex CASCADE;"
+
+          test "$(sudo -u postgres psql --cluster "${PG_VERSION}/ci" \
+            -X -d postgres -v ON_ERROR_STOP=1 -At \
+            -c 'SELECT pgvortex_version();')" = "0.1.0"
